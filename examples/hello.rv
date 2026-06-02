@@ -1,0 +1,28 @@
+~~ Riven v1.0 - Hello World and Logic Test
+consistof "system/core.rvh"
+
+firm AUTHOR = "Ansh"
+
+riven core {
+    imprint("--- Starting Riven Native ---")
+    
+    name = "Riven Language"
+    version = 1.0
+    
+    imprint("Language: " + name)
+    imprint("Author: " + AUTHOR)
+
+    score = 0
+    flow 5 {
+        score+>
+        imprint("Counting: " + txt(score))
+    }
+
+    if score == 5 {
+        imprint("Logic Test: Success")
+    } else {
+        imprint("Logic Test: Failure")
+    }
+
+    imprint("--- Test Finished ---")
+}
