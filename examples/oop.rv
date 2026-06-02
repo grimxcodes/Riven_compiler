@@ -1,0 +1,24 @@
+~~ Riven v1.0 - Object Oriented Programming Test
+
+frame Bot {
+    hidden id = 0
+    open name = "RivenBot"
+
+    boot(input_id) {
+        id = input_id
+        imprint("Bot spawned with ID: " + txt(id))
+    }
+
+    open greet() {
+        imprint("Hello from " + name)
+    }
+}
+
+riven core {
+    imprint("--- OOP Native Test ---")
+    
+    myBot = spawn Bot(101)
+    myBot.greet()
+    
+    imprint("--- OOP Finished ---")
+}
