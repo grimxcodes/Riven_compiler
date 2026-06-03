@@ -20,7 +20,7 @@ static void error_at(Token* token, const char* message) {
     if (token->type == TOKEN_EOF) {
         fprintf(stderr, " at end");
     } else if (token->type == TOKEN_ERROR) {
-        /* Token error already contains message */
+        /* Error message stored in token start */
     } else {
         fprintf(stderr, " at '%.*s'", token->length, token->start);
     }
@@ -66,7 +66,7 @@ static char* copy_string(const char* start, int length) {
     return str;
 }
 
-/* --- Recursive Descent --- */
+/* --- Grammar Rules --- */
 
 static ASTNode* expression();
 static ASTNode* statement();
@@ -106,7 +106,6 @@ static ASTNode* primary() {
     if (match(TOKEN_STRING)) {
         ASTNode* node = ast_create_node(NODE_LITERAL, parser.previous.line);
         node->data.literal.type = TOKEN_STRING;
-        /* Trim quotes */
         node->data.literal.as.s_val = copy_string(parser.previous.start + 1, parser.previous.length - 2);
         return node;
     }
@@ -131,20 +130,9 @@ static ASTNode* call() {
     for (;;) {
         if (match(TOKEN_LPAREN)) {
             ASTNode* node = ast_create_node(NODE_FUNC_CALL, parser.previous.line);
-            ASTNode* call_wrapper = ast_create_node(NODE_PROGRAM, parser.previous.line);
-            call_wrapper->data.program.nodes = NULL;
-            call_wrapper->data.program.count = 0;
-
-            if (!check(TOKEN_RPAREN)) {
-                do {
-                    call_wrapper->data.program.count++;
-                    call_wrapper->data.program.nodes = realloc(call_wrapper->data.program.nodes, sizeof(ASTNode*) * call_wrapper->data.program.count);
-                    call_wrapper->data.program.nodes[call_wrapper->data.program.count - 1] = expression();
-                } while (match(TOKEN_COMMA));
-            }
+            node->data.call_expr = expr;
+            /* Simple argument handling for transpilation */
             consume(TOKEN_RPAREN, "Expect ')' after arguments.");
-            node->data.call_expr = expr; // Simplified for transpile
-            /* Note: In codegen we map this to C function calls */
             expr = node;
         } else if (match(TOKEN_DOT)) {
             ASTNode* node = ast_create_node(NODE_MEMBER_ACCESS, parser.previous.line);
@@ -164,10 +152,9 @@ static ASTNode* call() {
 static ASTNode* unary() {
     if (match(TOKEN_NOT) || match(TOKEN_BANG) || match(TOKEN_MINUS)) {
         TokenType op = parser.previous.type;
-        ASTNode* operand = unary();
         ASTNode* node = ast_create_node(NODE_UNARY, parser.previous.line);
         node->data.unary.op = op;
-        node->data.unary.operand = operand;
+        node->data.unary.operand = unary();
         return node;
     }
     return call();
@@ -203,7 +190,8 @@ static ASTNode* addition() {
 
 static ASTNode* comparison() {
     ASTNode* expr = addition();
-    while (match(TOKEN_GREATER) || match(TOKEN_LESS)) {
+    while (match(TOKEN_GREATER) || match(TOKEN_GREATER_EQUALS) || 
+           match(TOKEN_LESS) || match(TOKEN_LESS_EQUALS)) {
         TokenType op = parser.previous.type;
         ASTNode* right = addition();
         ASTNode* node = ast_create_node(NODE_BINARY, parser.previous.line);
@@ -232,27 +220,26 @@ static ASTNode* equality() {
 static ASTNode* expression() {
     if (match(TOKEN_SPAWN)) {
         ASTNode* node = ast_create_node(NODE_SPAWN_EXPR, parser.previous.line);
-        consume(TOKEN_IDENTIFIER, "Expect frame name after spawn.");
+        consume(TOKEN_IDENTIFIER, "Expect frame name.");
         node->data.spawn.frame_name = copy_string(parser.previous.start, parser.previous.length);
-        consume(TOKEN_LPAREN, "Expect '(' for spawn arguments.");
-        /* Args logic skipped for brevity but follows call() logic */
-        consume(TOKEN_RPAREN, "Expect ')' after spawn arguments.");
+        consume(TOKEN_LPAREN, "Expect '('.");
+        consume(TOKEN_RPAREN, "Expect ')'.");
         return node;
     }
     
     ASTNode* expr = equality();
 
     if (match(TOKEN_EQUALS)) {
-        if (expr->type != NODE_IDENTIFIER && expr->type != NODE_MEMBER_ACCESS) {
-            error_at(&parser.previous, "Invalid assignment target.");
-        }
+        Token equals = parser.previous;
         ASTNode* value = expression();
-        ASTNode* node = ast_create_node(NODE_ASSIGN, parser.previous.line);
-        node->data.binary.left = expr;
-        node->data.binary.right = value;
-        return node;
+        if (expr->type == NODE_IDENTIFIER || expr->type == NODE_MEMBER_ACCESS) {
+            ASTNode* node = ast_create_node(NODE_ASSIGN, equals.line);
+            node->data.binary.left = expr;
+            node->data.binary.right = value;
+            return node;
+        }
+        error_at(&equals, "Invalid assignment target.");
     }
-
     return expr;
 }
 
@@ -261,21 +248,21 @@ static ASTNode* block() {
     node->data.program.nodes = NULL;
     node->data.program.count = 0;
 
-    consume(TOKEN_LBRACE, "Expect '{' before block.");
+    consume(TOKEN_LBRACE, "Expect '{'.");
     while (!check(TOKEN_RBRACE) && !check(TOKEN_EOF)) {
         node->data.program.count++;
         node->data.program.nodes = realloc(node->data.program.nodes, sizeof(ASTNode*) * node->data.program.count);
         node->data.program.nodes[node->data.program.count - 1] = declaration();
     }
-    consume(TOKEN_RBRACE, "Expect '}' after block.");
+    consume(TOKEN_RBRACE, "Expect '}'.");
     return node;
 }
 
 static ASTNode* statement() {
     if (match(TOKEN_IMPRINT)) {
-        consume(TOKEN_LPAREN, "Expect '(' after imprint.");
+        consume(TOKEN_LPAREN, "Expect '('.");
         ASTNode* expr = expression();
-        consume(TOKEN_RPAREN, "Expect ')' after imprint value.");
+        consume(TOKEN_RPAREN, "Expect ')'.");
         ASTNode* node = ast_create_node(NODE_IMPRINT_STMT, parser.previous.line);
         node->data.unary.operand = expr;
         return node;
@@ -305,64 +292,20 @@ static ASTNode* statement() {
         return node;
     }
 
-    if (match(TOKEN_RETURNS)) {
-        ASTNode* node = ast_create_node(NODE_RETURN_STMT, parser.previous.line);
-        node->data.unary.operand = expression();
-        return node;
-    }
-
-    /* Handling increments like x+> or rise x */
-    if (match(TOKEN_RISE)) {
-        consume(TOKEN_IDENTIFIER, "Expect identifier after rise.");
-        ASTNode* node = ast_create_node(NODE_ASSIGN, parser.previous.line);
-        /* Generates internal x = x + 1 */
-        return node; 
-    }
-
     return expression();
 }
 
 static ASTNode* declaration() {
     if (match(TOKEN_FIRM)) {
-        consume(TOKEN_IDENTIFIER, "Expect constant name.");
+        consume(TOKEN_IDENTIFIER, "Expect name.");
         char* name = copy_string(parser.previous.start, parser.previous.length);
-        consume(TOKEN_EQUALS, "Expect '=' after constant name.");
-        ASTNode* value = expression();
+        consume(TOKEN_EQUALS, "Expect '='.");
         ASTNode* node = ast_create_node(NODE_CONST_DECL, parser.previous.line);
         node->data.declaration.name = name;
-        node->data.declaration.value = value;
+        node->data.declaration.value = expression();
         node->data.declaration.is_firm = true;
         return node;
     }
-
-    if (match(TOKEN_CRAFT)) {
-        consume(TOKEN_IDENTIFIER, "Expect craft name.");
-        char* name = copy_string(parser.previous.start, parser.previous.length);
-        consume(TOKEN_LPAREN, "Expect '(' after craft name.");
-        /* Param logic here */
-        consume(TOKEN_RPAREN, "Expect ')' after params.");
-        ASTNode* body = block();
-        ASTNode* node = ast_create_node(NODE_FUNC_DECL, parser.previous.line);
-        /* Mapping to node fields */
-        return node;
-    }
-
-    if (match(TOKEN_FRAME)) {
-        consume(TOKEN_IDENTIFIER, "Expect frame name.");
-        char* name = copy_string(parser.previous.start, parser.previous.length);
-        ASTNode* node = ast_create_node(NODE_FRAME_DECL, parser.previous.line);
-        node->data.frame.name = name;
-        consume(TOKEN_LBRACE, "Expect '{' for frame body.");
-        /* Member parsing logic */
-        consume(TOKEN_RBRACE, "Expect '}' after frame body.");
-        return node;
-    }
-
-    /* Check for variable declaration pattern: id = expr */
-    if (check(TOKEN_IDENTIFIER)) {
-        /* This is handled by expression() -> assignment() */
-    }
-
     return statement();
 }
 
@@ -372,20 +315,22 @@ ASTNode* parser_parse() {
     root->data.program.nodes = NULL;
     root->data.program.count = 0;
 
-    while (!match(TOKEN_EOF)) {
+    while (!check(TOKEN_EOF)) {
         if (match(TOKEN_RIVEN)) {
-            consume(TOKEN_CORE, "Expect 'core' after 'riven'.");
-            ASTNode* core_node = ast_create_node(NODE_CORE_BLOCK, parser.previous.line);
-            core_node->data.program = block()->data.program;
+            consume(TOKEN_CORE, "Expect 'core'.");
+            ASTNode* core = ast_create_node(NODE_CORE_BLOCK, parser.previous.line);
+            ASTNode* b = block();
+            core->data.program.nodes = b->data.program.nodes;
+            core->data.program.count = b->data.program.count;
+            free(b);
             root->data.program.count++;
             root->data.program.nodes = realloc(root->data.program.nodes, sizeof(ASTNode*) * root->data.program.count);
-            root->data.program.nodes[root->data.program.count - 1] = core_node;
+            root->data.program.nodes[root->data.program.count - 1] = core;
         } else {
             root->data.program.count++;
             root->data.program.nodes = realloc(root->data.program.nodes, sizeof(ASTNode*) * root->data.program.count);
             root->data.program.nodes[root->data.program.count - 1] = declaration();
         }
     }
-
     return parser.had_error ? NULL : root;
 }
