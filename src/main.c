@@ -38,7 +38,7 @@ static char* read_file(const char* path) {
 }
 
 /**
- * CLI Driver: Handles 'run' and 'forge' commands.
+ * CLI Driver for Riven Native Compiler Toolchain.
  */
 int main(int argc, char* argv[]) {
     if (argc < 3) {
@@ -55,28 +55,28 @@ int main(int argc, char* argv[]) {
     /* 1. Read Source */
     char* source = read_file(filename);
 
-    /* 2. Lexical Analysis */
+    /* 2. Lexical Analysis Initialization */
     lexer_init(source);
 
-    /* 3. Syntax Analysis (Parsing) */
+    /* 3. Syntax Analysis (Parsing) into AST */
     ASTNode* root = parser_parse();
     if (root == NULL) {
-        /* Error messages are handled inside the parser */
+        /* Error messages handled by parser */
         free(source);
         return 65; 
     }
 
     /* 4. Native Code Generation (Transpilation to C11) */
-    /* Generates an intermediate 'riven_native.c' file */
+    /* Generates 'riven_native.c' in the current working directory */
     codegen_generate(root, "riven_native.c");
 
-    /* 5. Toolchain Invocation (System Compiler) */
+    /* 5. Toolchain Invocation (System C Compiler) */
     char compile_cmd[2048];
     const char* output_name = "riven_output";
     char* final_binary_name = NULL;
 
     if (strcmp(command, "forge") == 0) {
-        /* Determine output name by stripping .rv extension */
+        /* Strip .rv and use it as binary name */
         char* out_name = strdup(filename);
         char* dot = strrchr(out_name, '.');
         if (dot) *dot = '\0';
@@ -85,28 +85,29 @@ int main(int argc, char* argv[]) {
         final_binary_name = strdup(output_name);
     }
 
-    /* Build the GCC command. 
-       Links the generated code with src/runtime.c which contains ARC and imprint logic. */
+    /* FIX: Added -Iinclude flag to allow the backend compiler to find Riven runtime headers.
+       We link with src/runtime.c directly during the forge process. */
 #ifdef _WIN32
     snprintf(compile_cmd, sizeof(compile_cmd), 
-             "gcc -O3 riven_native.c src/runtime.c -o %s.exe", final_binary_name);
+             "gcc -O3 riven_native.c src/runtime.c -o %s.exe -Iinclude -lws2_32 -lpthread", final_binary_name);
 #else
+    /* On Linux/Termux, use lpthread and lm for math/async support */
     snprintf(compile_cmd, sizeof(compile_cmd), 
-             "gcc -O3 riven_native.c src/runtime.c -o %s -lpthread", final_binary_name);
+             "gcc -O3 riven_native.c src/runtime.c -o %s -Iinclude -lpthread -lm", final_binary_name);
 #endif
 
-    printf("Riven: Building native binary...\n");
+    printf("Riven: Building native binary [%s]...\n", final_binary_name);
     int compile_result = system(compile_cmd);
 
     if (compile_result != 0) {
-        fprintf(stderr, "Toolchain Error: Native compilation failed.\n");
+        fprintf(stderr, "Toolchain Error: Native compilation failed (Exit Code: %d).\n", compile_result);
         free(source);
         free(final_binary_name);
         ast_free(root);
         return 1;
     }
 
-    /* 6. Execution (if 'run' command) */
+    /* 6. Execution (for 'run' command) */
     if (strcmp(command, "run") == 0) {
         char run_cmd[512];
 #ifdef _WIN32
@@ -117,7 +118,7 @@ int main(int argc, char* argv[]) {
         printf("Riven: Executing...\n\n");
         system(run_cmd);
 
-        /* Cleanup temporary binary */
+        /* Cleanup temporary artifacts */
         remove("riven_native.c");
 #ifdef _WIN32
         char cleanup_bin[512];
@@ -127,12 +128,12 @@ int main(int argc, char* argv[]) {
         remove(final_binary_name);
 #endif
     } else {
-        /* Keep binary for 'forge' command */
-        printf("Riven: Native binary forged successfully -> %s\n", final_binary_name);
+        /* Success message for 'forge' command */
+        printf("Riven: Native binary forged successfully -> ./%s\n", final_binary_name);
         remove("riven_native.c");
     }
 
-    /* Cleanup */
+    /* Final Memory Cleanup of the compiler process */
     ast_free(root);
     free(source);
     free(final_binary_name);
