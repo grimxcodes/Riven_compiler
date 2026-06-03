@@ -1,13 +1,13 @@
 ~~ Riven Core System Header v1.0
-~~ This library provides core definitions for the Native Runtime
+~~ Provides standard metadata for the Native Compiler Toolchain
 
 firm RIVEN_VERSION = 1.0
-firm RIVEN_PLATFORM = "Native C11"
+firm RIVEN_STDLIB_REV = 1
+firm RIVEN_BACKEND = "C11/GCC"
 
 <<
-    The 'imprint' and 'grab' functions are built-in.
-    This header serves as a verification that the import
-    system is resolving .rvh extensions correctly.
+    The 'imprint' function is a core intrinsic.
+    This header serves as the primary import test.
 >>
 
-imprint("Riven Core System Initialized")
+imprint("Riven Runtime Environment Initialized.")
