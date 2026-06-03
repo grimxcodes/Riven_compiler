@@ -67,8 +67,10 @@ const char* rv_to_txt(RvValue v);
 
 typedef enum { 
     OP_ADD, OP_SUB, OP_MUL, OP_DIV, 
-    OP_EQ, OP_NEQ, OP_GT, OP_LT, 
-    OP_AND, OP_OR, OP_NEG, OP_NOT 
+    OP_EQ, OP_NEQ, OP_GT, OP_GTE, 
+    OP_LT, OP_LTE, 
+    OP_AND, OP_OR, OP_NEG, OP_NOT,
+    OP_UNKNOWN
 } RvOp;
 
 RvValue rv_op_binary(RvValue left, RvOp op, RvValue right);
