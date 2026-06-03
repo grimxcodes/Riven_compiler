@@ -1,288 +1,159 @@
-#include "../include/riven.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
+#include <pthread.h>
+#include "../include/riven_runtime.h"
 
-static FILE* out;
-static int indent_level = 0;
+typedef struct RvSymbol {
+    char* name;
+    RvValue value;
+    bool is_firm;
+    struct RvSymbol* next;
+} RvSymbol;
 
-static void emit_indent() {
-    for (int i = 0; i < indent_level; i++) {
-        fprintf(out, "    ");
-    }
+struct RvEnv {
+    RvSymbol* symbols;
+    struct RvEnv* parent;
+};
+
+void rv_retain(RvValue v) {
+    if (v.type == RV_TXT && v.as.s_ptr != NULL) v.as.s_ptr->ref_count++;
 }
 
-/* Forward Declarations for Full AST Traversal */
-static void gen_node(ASTNode* node, Environment* env);
-static void gen_expression(ASTNode* node, Environment* env);
-
-/**
- * Handles Riven's Binary Operators mapping to Runtime C Ops.
- * Covers: +, -, *, /, ==, !=, >, <, >=, <=, and, or.
- */
-static void gen_binary_op(ASTNode* node, Environment* env) {
-    fprintf(out, "rv_op_binary(");
-    gen_expression(node->data.binary.left, env);
-    fprintf(out, ", ");
-
-    switch (node->data.binary.op) {
-        case TOKEN_PLUS:           fprintf(out, "OP_ADD"); break;
-        case TOKEN_MINUS:          fprintf(out, "OP_SUB"); break;
-        case TOKEN_STAR:           fprintf(out, "OP_MUL"); break;
-        case TOKEN_SLASH:          fprintf(out, "OP_DIV"); break;
-        case TOKEN_EQUALS_EQUALS:  fprintf(out, "OP_EQ");  break;
-        case TOKEN_BANG_EQUALS:    fprintf(out, "OP_NEQ"); break;
-        case TOKEN_GREATER:        fprintf(out, "OP_GT");  break;
-        case TOKEN_GREATER_EQUALS: fprintf(out, "OP_GTE"); break;
-        case TOKEN_LESS:           fprintf(out, "OP_LT");  break;
-        case TOKEN_LESS_EQUALS:    fprintf(out, "OP_LTE"); break;
-        case TOKEN_AND:
-        case TOKEN_AMP_AMP:        fprintf(out, "OP_AND"); break;
-        case TOKEN_OR:
-        case TOKEN_PIPE_PIPE:      fprintf(out, "OP_OR");  break;
-        default:                   fprintf(out, "OP_UNKNOWN"); break;
-    }
-
-    fprintf(out, ", ");
-    gen_expression(node->data.binary.right, env);
-    fprintf(out, ")");
-}
-
-/**
- * Handles Expression Generation including ARC Retain calls.
- */
-static void gen_expression(ASTNode* node, Environment* env) {
-    if (node == NULL) {
-        fprintf(out, "rv_emp()");
-        return;
-    }
-
-    switch (node->type) {
-        case NODE_LITERAL: {
-            ASTValue v = node->data.literal;
-            if (v.type == TOKEN_INT) fprintf(out, "rv_int(%ld)", v.as.i_val);
-            else if (v.type == TOKEN_DNUM) fprintf(out, "rv_dnum(%f)", v.as.d_val);
-            else if (v.type == TOKEN_STRING) fprintf(out, "rv_txt(\"%s\")", v.as.s_val);
-            else if (v.type == TOKEN_CORRECT) fprintf(out, "rv_bool(true)");
-            else if (v.type == TOKEN_INCORRECT) fprintf(out, "rv_bool(false)");
-            else if (v.type == TOKEN_EMP) fprintf(out, "rv_emp()");
-            break;
+void rv_release(RvValue v) {
+    if (v.type == RV_TXT && v.as.s_ptr != NULL) {
+        v.as.s_ptr->ref_count--;
+        if (v.as.s_ptr->ref_count <= 0) {
+            free(v.as.s_ptr->data);
+            free(v.as.s_ptr);
         }
-
-        case NODE_IDENTIFIER:
-            /* Automatic Reference Counting: The runtime handles the retain logic here */
-            fprintf(out, "rv_get_var(env, \"%s\")", node->data.identifier);
-            break;
-
-        case NODE_BINARY:
-            gen_binary_op(node, env);
-            break;
-
-        case NODE_UNARY:
-            fprintf(out, "rv_op_unary(");
-            if (node->data.unary.op == TOKEN_MINUS) fprintf(out, "OP_NEG");
-            else if (node->data.unary.op == TOKEN_NOT || node->data.unary.op == TOKEN_BANG) fprintf(out, "OP_NOT");
-            fprintf(out, ", ");
-            gen_expression(node->data.unary.operand, env);
-            fprintf(out, ")");
-            break;
-
-        case NODE_SPAWN_EXPR:
-            fprintf(out, "rv_spawn(env, \"%s\")", node->data.spawn.frame_name);
-            break;
-
-        case NODE_MEMBER_ACCESS:
-            fprintf(out, "rv_get_member(");
-            gen_expression(node->data.binary.left, env);
-            fprintf(out, ", \"%s\")", node->data.binary.right->data.identifier);
-            break;
-
-        case NODE_FUNC_CALL:
-            fprintf(out, "rv_call_craft(env, \"%s\")", node->data.identifier);
-            break;
-
-        default:
-            fprintf(out, "rv_emp()");
-            break;
     }
 }
 
-/**
- * Main Node Generation Pass (Statements and Declarations)
- */
-static void gen_node(ASTNode* node, Environment* env) {
-    if (node == NULL) return;
+RvValue rv_int(long val) { return (RvValue){.type = RV_INT, .as.i_val = val}; }
+RvValue rv_dnum(double val) { return (RvValue){.type = RV_DNUM, .as.d_val = val}; }
+RvValue rv_bool(bool val) { return (RvValue){.type = RV_BOOL, .as.b_val = val}; }
+RvValue rv_txt(const char* val) {
+    RvString* rs = malloc(sizeof(RvString));
+    rs->ref_count = 1;
+    rs->data = strdup(val);
+    return (RvValue){.type = RV_TXT, .as.s_ptr = rs};
+}
+RvValue rv_emp() { return (RvValue){.type = RV_EMP}; }
 
-    switch (node->type) {
-        case NODE_PROGRAM:
-            for (int i = 0; i < node->data.program.count; i++) {
-                gen_node(node->data.program.nodes[i], env);
-            }
-            break;
-
-        case NODE_CORE_BLOCK:
-            fprintf(out, "\n/* --- RIVEN CORE ENTRY POINT --- */\n");
-            fprintf(out, "int main(int argc, char** argv) {\n");
-            indent_level++;
-            emit_indent();
-            fprintf(out, "rv_init_runtime();\n");
-            emit_indent();
-            fprintf(out, "RvEnv* env = rv_env_create(NULL);\n");
-
-            for (int i = 0; i < node->data.program.count; i++) {
-                gen_node(node->data.program.nodes[i], env);
-            }
-
-            emit_indent();
-            fprintf(out, "rv_env_free(env);\n");
-            emit_indent();
-            fprintf(out, "rv_shutdown_runtime();\n");
-            emit_indent();
-            fprintf(out, "return 0;\n");
-            indent_level--;
-            fprintf(out, "}\n");
-            break;
-
-        case NODE_IMPRINT_STMT:
-            emit_indent();
-            fprintf(out, "rv_imprint(");
-            gen_expression(node->data.unary.operand, env);
-            fprintf(out, ");\n");
-            break;
-
-        case NODE_VAR_DECL:
-        case NODE_CONST_DECL:
-            emit_indent();
-            fprintf(out, "rv_define_var(env, \"%s\", ", node->data.declaration.name);
-            gen_expression(node->data.declaration.value, env);
-            fprintf(out, ", %s);\n", node->data.declaration.is_firm ? "true" : "false");
-            break;
-
-        case NODE_ASSIGN:
-            emit_indent();
-            if (node->data.binary.left->type == NODE_MEMBER_ACCESS) {
-                fprintf(out, "rv_set_member(");
-                gen_expression(node->data.binary.left->data.binary.left, env);
-                fprintf(out, ", \"%s\", ", node->data.binary.left->data.binary.right->data.identifier);
-                gen_expression(node->data.binary.right, env);
-                fprintf(out, ");\n");
-            } else {
-                fprintf(out, "rv_set_var(env, \"%s\", ", node->data.binary.left->data.identifier);
-                gen_expression(node->data.binary.right, env);
-                fprintf(out, ");\n");
-            }
-            break;
-
-        case NODE_IF_STMT:
-            emit_indent();
-            fprintf(out, "if (rv_is_truthy(");
-            gen_expression(node->data.conditional.condition, env);
-            fprintf(out, ")) {\n");
-            indent_level++;
-            gen_node(node->data.conditional.then_branch, env);
-            indent_level--;
-            emit_indent();
-            fprintf(out, "}");
-            if (node->data.conditional.else_branch) {
-                fprintf(out, " else {\n");
-                indent_level++;
-                gen_node(node->data.conditional.else_branch, env);
-                indent_level--;
-                emit_indent();
-                fprintf(out, "}\n");
-            } else {
-                fprintf(out, "\n");
-            }
-            break;
-
-        case NODE_FLOW_LOOP:
-            emit_indent();
-            fprintf(out, "{\n");
-            indent_level++;
-            emit_indent();
-            fprintf(out, "long _limit = rv_to_int(");
-            gen_expression(node->data.loop.count_expr, env);
-            fprintf(out, ");\n");
-            emit_indent();
-            fprintf(out, "for (long i = 0; i < _limit; i++) {\n");
-            indent_level++;
-            gen_node(node->data.loop.body, env);
-            indent_level--;
-            emit_indent();
-            fprintf(out, "}\n");
-            indent_level--;
-            emit_indent();
-            fprintf(out, "}\n");
-            break;
-
-        case NODE_DURING_LOOP:
-            emit_indent();
-            fprintf(out, "while (rv_is_truthy(");
-            gen_expression(node->data.loop.condition, env);
-            fprintf(out, ")) {\n");
-            indent_level++;
-            gen_node(node->data.loop.body, env);
-            indent_level--;
-            emit_indent();
-            fprintf(out, "}\n");
-            break;
-
-        case NODE_FRAME_DECL:
-            emit_indent();
-            fprintf(out, "/* Frame: %s Registration */\n", node->data.frame.name);
-            fprintf(out, "rv_register_frame(\"%s\");\n", node->data.frame.name);
-            /* Implementation of boot() and members would follow in a specialized frame pass */
-            break;
-
-        case NODE_ASYNC_SPARK:
-            emit_indent();
-            fprintf(out, "rv_spark_task(");
-            gen_expression(node->data.call_expr, env);
-            fprintf(out, ");\n");
-            break;
-
-        case NODE_SYNC_STMT:
-            emit_indent();
-            fprintf(out, "rv_sync_tasks();\n");
-            break;
-
-        case NODE_RAW_BLOCK:
-            fprintf(out, "\n/* --- RAW UNSAFE BLOCK --- */\n");
-            /* In a native compiler, we emit direct C code if possible, or handle it as a specialized block */
-            break;
-
-        case NODE_RETURN_STMT:
-            emit_indent();
-            fprintf(out, "return ");
-            gen_expression(node->data.unary.operand, env);
-            fprintf(out, ";\n");
-            break;
-
-        default:
-            break;
-    }
+RvEnv* rv_env_create(RvEnv* parent) {
+    RvEnv* env = malloc(sizeof(RvEnv));
+    env->symbols = NULL;
+    env->parent = parent;
+    return env;
 }
 
-/**
- * Entry point for Code Generation.
- * Strictly transpiles the full AST into optimized C11 code.
- */
-void codegen_generate(ASTNode* root, const char* output_path) {
-    out = fopen("riven_native.c", "w");
-    if (out == NULL) {
-        fprintf(stderr, "Compiler Error: Could not create intermediate C file for native build.\n");
-        exit(1);
-    }
-
-    /* Emit Mandatory Runtime Headers */
-    fprintf(out, "/* AUTO-GENERATED BY RIVEN COMPILER v1.0 */\n");
-    fprintf(out, "#include <stdio.h>\n");
-    fprintf(out, "#include <stdbool.h>\n");
-    fprintf(out, "#include \"riven_runtime.h\"\n\n");
-
-    /* AST Traversal Start */
-    gen_node(root, NULL);
-
-    fclose(out);
-    printf("Native transpilation phase complete. Generated: riven_native.c\n");
+void rv_define_var(RvEnv* env, const char* name, RvValue val, bool is_firm) {
+    RvSymbol* sym = malloc(sizeof(RvSymbol));
+    sym->name = strdup(name);
+    rv_retain(val);
+    sym->value = val;
+    sym->is_firm = is_firm;
+    sym->next = env->symbols;
+    env->symbols = sym;
 }
+
+void rv_set_var(RvEnv* env, const char* name, RvValue val) {
+    RvSymbol* curr = env->symbols;
+    while (curr) {
+        if (strcmp(curr->name, name) == 0) {
+            if (curr->is_firm) { fprintf(stderr, "Error: Firm constant '%s' modified.\n", name); exit(1); }
+            rv_retain(val);
+            rv_release(curr->value);
+            curr->value = val;
+            return;
+        }
+        curr = curr->next;
+    }
+    if (env->parent) rv_set_var(env->parent, name, val);
+}
+
+RvValue rv_get_var(RvEnv* env, const char* name) {
+    RvSymbol* curr = env->symbols;
+    while (curr) {
+        if (strcmp(curr->name, name) == 0) { rv_retain(curr->value); return curr->value; }
+        curr = curr->next;
+    }
+    if (env->parent) return rv_get_var(env->parent, name);
+    fprintf(stderr, "Error: Undefined variable '%s'.\n", name); exit(1);
+}
+
+void rv_env_free(RvEnv* env) {
+    RvSymbol* curr = env->symbols;
+    while (curr) {
+        RvSymbol* next = curr->next;
+        rv_release(curr->value);
+        free(curr->name);
+        free(curr);
+        curr = next;
+    }
+    free(env);
+}
+
+RvValue rv_op_unary(RvOp op, RvValue operand) {
+    RvValue res = rv_emp();
+    if (op == OP_TO_TXT) {
+        char buf[128];
+        if (operand.type == RV_INT) sprintf(buf, "%ld", operand.as.i_val);
+        else if (operand.type == RV_DNUM) sprintf(buf, "%g", operand.as.d_val);
+        else if (operand.type == RV_BOOL) sprintf(buf, "%s", operand.as.b_val ? "correct" : "incorrect");
+        else strcpy(buf, "emp");
+        res = rv_txt(buf);
+    } else if (op == OP_NEG && operand.type == RV_INT) {
+        res = rv_int(-operand.as.i_val);
+    } else if (op == OP_NOT) {
+        res = rv_bool(!rv_is_truthy(operand));
+    }
+    rv_release(operand);
+    return res;
+}
+
+RvValue rv_op_binary(RvValue left, RvOp op, RvValue right) {
+    RvValue res = rv_emp();
+    if (left.type == RV_INT && right.type == RV_INT) {
+        switch (op) {
+            case OP_ADD: res = rv_int(left.as.i_val + right.as.i_val); break;
+            case OP_SUB: res = rv_int(left.as.i_val - right.as.i_val); break;
+            case OP_MUL: res = rv_int(left.as.i_val * right.as.i_val); break;
+            case OP_DIV: res = rv_int(left.as.i_val / right.as.i_val); break;
+            case OP_EQ:  res = rv_bool(left.as.i_val == right.as.i_val); break;
+            case OP_GT:  res = rv_bool(left.as.i_val > right.as.i_val); break;
+            case OP_GTE: res = rv_bool(left.as.i_val >= right.as.i_val); break;
+            case OP_LT:  res = rv_bool(left.as.i_val < right.as.i_val); break;
+            case OP_LTE: res = rv_bool(left.as.i_val <= right.as.i_val); break;
+            default: break;
+        }
+    } else if (left.type == RV_TXT && right.type == RV_TXT && op == OP_ADD) {
+        char* b = malloc(strlen(left.as.s_ptr->data) + strlen(right.as.s_ptr->data) + 1);
+        strcpy(b, left.as.s_ptr->data); strcat(b, right.as.s_ptr->data);
+        res = rv_txt(b); free(b);
+    }
+    rv_release(left); rv_release(right);
+    return res;
+}
+
+bool rv_is_truthy(RvValue v) {
+    bool t = (v.type == RV_BOOL) ? v.as.b_val : (v.type != RV_EMP);
+    rv_release(v); return t;
+}
+
+void rv_imprint(RvValue v) {
+    if (v.type == RV_INT) printf("%ld\n", v.as.i_val);
+    else if (v.type == RV_TXT) printf("%s\n", v.as.s_ptr->data);
+    else if (v.type == RV_BOOL) printf("%s\n", v.as.b_val ? "correct" : "incorrect");
+    rv_release(v);
+}
+
+long rv_to_int(RvValue v) {
+    long r = (v.type == RV_INT) ? v.as.i_val : 0;
+    rv_release(v); return r;
+}
+
+void rv_init_runtime() {}
+void rv_shutdown_runtime() {}
