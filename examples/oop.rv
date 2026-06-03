@@ -1,24 +1,27 @@
-~~ Riven v1.0 - Object Oriented Programming Test
+~~ Riven v1.0 - Object Oriented Frame Test
 
-frame Bot {
+frame Machine {
     hidden id = 0
-    open name = "RivenBot"
+    open model = "RX-Core"
 
     boot(input_id) {
         id = input_id
-        imprint("Bot spawned with ID: " + txt(id))
+        imprint("Machine Frame Initialized with ID: " + txt(id))
     }
 
-    open greet() {
-        imprint("Hello from " + name)
+    open activate() {
+        imprint("Machine " + model + " is now online.")
     }
 }
 
 riven core {
-    imprint("--- OOP Native Test ---")
+    imprint("--- Starting OOP Test ---")
     
-    myBot = spawn Bot(101)
-    myBot.greet()
+    ~~ Instantiating the frame
+    my_unit = spawn Machine(77)
     
-    imprint("--- OOP Finished ---")
+    ~~ Calling public method
+    my_unit.activate()
+    
+    imprint("--- OOP Test Complete ---")
 }
