@@ -4,25 +4,31 @@ consistof "system/core.rvh"
 firm AUTHOR = "Ansh"
 
 riven core {
-    imprint("--- Starting Riven Native ---")
+    imprint("--- Starting Riven Native Execution ---")
     
-    name = "Riven Language"
+    name = "Riven Compiler"
+    age = 18
     version = 1.0
     
-    imprint("Language: " + name)
+    imprint("Language Name: " + name)
+    imprint("Language Version: " + txt(version))
     imprint("Author: " + AUTHOR)
 
+    ~~ Testing Increments
     score = 0
+    imprint("Initial Score: " + txt(score))
+    
     flow 5 {
         score+>
-        imprint("Counting: " + txt(score))
+        imprint("Flow Count: " + txt(score))
     }
 
-    if score == 5 {
-        imprint("Logic Test: Success")
+    ~~ Testing Boolean Logic
+    if score == 5 and age >= 18 {
+        imprint("Logic Check: PASS")
     } else {
-        imprint("Logic Test: Failure")
+        imprint("Logic Check: FAIL")
     }
 
-    imprint("--- Test Finished ---")
+    imprint("--- Native Execution Finished ---")
 }
