@@ -18,10 +18,6 @@ typedef struct {
     char* data;
 } RvString;
 
-/**
- * The core value structure used at runtime.
- * Implements a tagged union with metadata for ARC and immutability.
- */
 typedef struct {
     RvType type;
     bool is_firm;
@@ -61,7 +57,6 @@ RvValue rv_emp(void);
 
 void rv_imprint(RvValue v);
 long rv_to_int(RvValue v);
-const char* rv_to_txt(RvValue v);
 
 /* --- Operators --- */
 
@@ -69,7 +64,9 @@ typedef enum {
     OP_ADD, OP_SUB, OP_MUL, OP_DIV, 
     OP_EQ, OP_NEQ, OP_GT, OP_GTE, 
     OP_LT, OP_LTE, 
-    OP_AND, OP_OR, OP_NEG, OP_NOT,
+    OP_AND, OP_OR, 
+    OP_NEG, OP_NOT,
+    OP_TO_TXT, OP_TO_INT, OP_TO_DNUM, /* Added missing conversion ops */
     OP_UNKNOWN
 } RvOp;
 
