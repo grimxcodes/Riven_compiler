@@ -73,22 +73,24 @@ typedef enum {
     TOKEN_PTR,
 
     /* Built-ins */
-    TOKEN_IMPRINT,    /* Replaced stamp */
+    TOKEN_IMPRINT,    /* Output */
     TOKEN_GRAB,
     TOKEN_FETCH,
 
     /* Operators */
-    TOKEN_EQUALS,         /* = */
-    TOKEN_EQUALS_EQUALS,  /* == */
-    TOKEN_BANG_EQUALS,    /* != */
-    TOKEN_PLUS,           /* + */
-    TOKEN_MINUS,          /* - */
-    TOKEN_STAR,           /* * */
-    TOKEN_SLASH,          /* / */
-    TOKEN_GREATER,        /* > */
-    TOKEN_LESS,           /* < */
-    TOKEN_PLUS_GT,        /* +> */
-    TOKEN_MINUS_LT,       /* -< */
+    TOKEN_EQUALS,          /* = */
+    TOKEN_EQUALS_EQUALS,   /* == */
+    TOKEN_BANG_EQUALS,     /* != */
+    TOKEN_PLUS,            /* + */
+    TOKEN_MINUS,           /* - */
+    TOKEN_STAR,            /* * */
+    TOKEN_SLASH,           /* / */
+    TOKEN_GREATER,         /* > */
+    TOKEN_GREATER_EQUALS,  /* >= */
+    TOKEN_LESS,            /* < */
+    TOKEN_LESS_EQUALS,     /* <= */
+    TOKEN_PLUS_GT,         /* +> */
+    TOKEN_MINUS_LT,        /* -< */
     TOKEN_RISE,
     TOKEN_DROP,
 
@@ -140,7 +142,6 @@ typedef enum {
     NODE_ERROR_RESC
 } ASTNodeType;
 
-/* Value Container for Parser/AST (Not for Runtime) */
 typedef struct {
     TokenType type;
     union {
@@ -155,20 +156,17 @@ typedef struct ASTNode {
     ASTNodeType type;
     int line;
     union {
-        /* Program Structure */
         struct {
             struct ASTNode** nodes;
             int count;
         } program;
 
-        /* Variable/Const Logic */
         struct {
             char* name;
             struct ASTNode* value;
             bool is_firm;
         } declaration;
 
-        /* Expressions */
         struct {
             struct ASTNode* left;
             TokenType op;
@@ -180,7 +178,6 @@ typedef struct ASTNode {
             struct ASTNode* operand;
         } unary;
 
-        /* Control Flow */
         struct {
             struct ASTNode* condition;
             struct ASTNode* then_branch;
@@ -193,7 +190,6 @@ typedef struct ASTNode {
             struct ASTNode* body;
         } loop;
 
-        /* OOP */
         struct {
             char* name;
             struct ASTNode** members;
@@ -206,7 +202,6 @@ typedef struct ASTNode {
             int arg_count;
         } spawn;
 
-        /* Built-ins & Literals */
         ASTValue literal;
         char* identifier;
         struct ASTNode* call_expr;
@@ -215,18 +210,14 @@ typedef struct ASTNode {
 
 /* --- Native Compiler Toolchain API --- */
 
-/* Lexer (lexer.c) */
 void lexer_init(const char* source);
 Token lexer_scan_token(void);
 
-/* Parser (parser.c) */
 ASTNode* parser_parse(void);
 
-/* AST Builder (ast.c) */
 ASTNode* ast_create_node(ASTNodeType type, int line);
 void ast_free(ASTNode* node);
 
-/* Semantic Analysis / Scoping (environment.c) */
 typedef struct Symbol {
     char* name;
     bool is_firm;
@@ -241,17 +232,10 @@ typedef struct Environment {
 } Environment;
 
 Environment* env_create(Environment* parent);
+void env_free(Environment* env);
 void env_add_symbol(Environment* env, const char* name, bool is_firm, bool is_public);
 bool env_exists(Environment* env, const char* name);
 
-/* Native Code Generator (codegen.c) */
 void codegen_generate(ASTNode* root, const char* output_path);
-
-/* CLI Driver (main.c) */
-typedef struct {
-    const char* input_file;
-    const char* output_file;
-    bool is_forge;
-} CompilerConfig;
 
 #endif /* RIVEN_H */
