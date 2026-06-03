@@ -137,7 +137,12 @@ static TokenType identifier_type() {
                             switch (scanner.start[2]) {
                                 case 'l': return check_keyword(3, 1, "l", TOKEN_COLL);
                                 case 'n': return check_keyword(3, 7, "sistof", TOKEN_CONSISTOF);
-                                case 'r': return check_keyword(3, 4, "rect", TOKEN_CORRECT);
+                                case 'r': 
+                                    if (scanner.current - scanner.start > 3) {
+                                        if (scanner.start[3] == 'e') return check_keyword(4, 0, "", TOKEN_CORE);
+                                        if (scanner.start[3] == 'r') return check_keyword(3, 4, "rect", TOKEN_CORRECT);
+                                    }
+                                    break;
                             }
                         }
                         break;
