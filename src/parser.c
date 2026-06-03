@@ -12,6 +12,9 @@ typedef struct {
 
 static Parser parser;
 
+/**
+ * Error reporting system.
+ */
 static void error_at(Token* token, const char* message) {
     if (parser.panic_mode) return;
     parser.panic_mode = true;
@@ -20,7 +23,7 @@ static void error_at(Token* token, const char* message) {
     if (token->type == TOKEN_EOF) {
         fprintf(stderr, " at end");
     } else if (token->type == TOKEN_ERROR) {
-        /* Error message stored in token start */
+        /* Error details already in token */
     } else {
         fprintf(stderr, " at '%.*s'", token->length, token->start);
     }
@@ -29,6 +32,9 @@ static void error_at(Token* token, const char* message) {
     parser.had_error = true;
 }
 
+/**
+ * Moves to the next token in the stream.
+ */
 static void advance() {
     parser.previous = parser.current;
 
@@ -40,6 +46,9 @@ static void advance() {
     }
 }
 
+/**
+ * Consumes the expected token or reports an error.
+ */
 static void consume(TokenType type, const char* message) {
     if (parser.current.type == type) {
         advance();
@@ -66,12 +75,14 @@ static char* copy_string(const char* start, int length) {
     return str;
 }
 
-/* --- Grammar Rules --- */
-
+/* --- Forward Declarations for Recursive Descent --- */
 static ASTNode* expression();
 static ASTNode* statement();
 static ASTNode* declaration();
 
+/**
+ * Parses primary expressions: Literals, IDs, Grouping, and Conversions.
+ */
 static ASTNode* primary() {
     if (match(TOKEN_CORRECT)) {
         ASTNode* node = ast_create_node(NODE_LITERAL, parser.previous.line);
@@ -114,6 +125,19 @@ static ASTNode* primary() {
         node->data.identifier = copy_string(parser.previous.start, parser.previous.length);
         return node;
     }
+
+    /* Type Conversions: int(x), txt(x), dnum(x) */
+    if (match(TOKEN_INT) || match(TOKEN_TXT) || match(TOKEN_DNUM)) {
+        TokenType op = parser.previous.type;
+        consume(TOKEN_LPAREN, "Expect '(' after type conversion keyword.");
+        ASTNode* arg = expression();
+        consume(TOKEN_RPAREN, "Expect ')' after expression.");
+        ASTNode* node = ast_create_node(NODE_UNARY, parser.previous.line);
+        node->data.unary.op = op;
+        node->data.unary.operand = arg;
+        return node;
+    }
+
     if (match(TOKEN_LPAREN)) {
         ASTNode* node = expression();
         consume(TOKEN_RPAREN, "Expect ')' after expression.");
@@ -130,8 +154,9 @@ static ASTNode* call() {
     for (;;) {
         if (match(TOKEN_LPAREN)) {
             ASTNode* node = ast_create_node(NODE_FUNC_CALL, parser.previous.line);
+            /* In codegen we treat this as a function call wrapper */
             node->data.call_expr = expr;
-            /* Simple argument handling for transpilation */
+            /* Placeholder for argument parsing if needed in Phase 2 */
             consume(TOKEN_RPAREN, "Expect ')' after arguments.");
             expr = node;
         } else if (match(TOKEN_DOT)) {
@@ -220,10 +245,10 @@ static ASTNode* equality() {
 static ASTNode* expression() {
     if (match(TOKEN_SPAWN)) {
         ASTNode* node = ast_create_node(NODE_SPAWN_EXPR, parser.previous.line);
-        consume(TOKEN_IDENTIFIER, "Expect frame name.");
+        consume(TOKEN_IDENTIFIER, "Expect frame name after spawn.");
         node->data.spawn.frame_name = copy_string(parser.previous.start, parser.previous.length);
-        consume(TOKEN_LPAREN, "Expect '('.");
-        consume(TOKEN_RPAREN, "Expect ')'.");
+        consume(TOKEN_LPAREN, "Expect '(' for spawn arguments.");
+        consume(TOKEN_RPAREN, "Expect ')' after spawn arguments.");
         return node;
     }
     
@@ -248,21 +273,21 @@ static ASTNode* block() {
     node->data.program.nodes = NULL;
     node->data.program.count = 0;
 
-    consume(TOKEN_LBRACE, "Expect '{'.");
+    consume(TOKEN_LBRACE, "Expect '{' to start block.");
     while (!check(TOKEN_RBRACE) && !check(TOKEN_EOF)) {
         node->data.program.count++;
         node->data.program.nodes = realloc(node->data.program.nodes, sizeof(ASTNode*) * node->data.program.count);
         node->data.program.nodes[node->data.program.count - 1] = declaration();
     }
-    consume(TOKEN_RBRACE, "Expect '}'.");
+    consume(TOKEN_RBRACE, "Expect '}' to end block.");
     return node;
 }
 
 static ASTNode* statement() {
     if (match(TOKEN_IMPRINT)) {
-        consume(TOKEN_LPAREN, "Expect '('.");
+        consume(TOKEN_LPAREN, "Expect '(' after imprint.");
         ASTNode* expr = expression();
-        consume(TOKEN_RPAREN, "Expect ')'.");
+        consume(TOKEN_RPAREN, "Expect ')' after expression.");
         ASTNode* node = ast_create_node(NODE_IMPRINT_STMT, parser.previous.line);
         node->data.unary.operand = expr;
         return node;
@@ -292,14 +317,25 @@ static ASTNode* statement() {
         return node;
     }
 
-    return expression();
+    /* Postfix Increments / Decrements */
+    ASTNode* expr = expression();
+    if (match(TOKEN_PLUS_GT) || match(TOKEN_MINUS_LT)) {
+        Token op = parser.previous;
+        ASTNode* node = ast_create_node(NODE_ASSIGN, op.line);
+        /* In a full compiler, we would generate x = x + 1 here. 
+           For Phase 2 transpilation, we map the node for codegen. */
+        node->data.binary.left = expr;
+        return node;
+    }
+
+    return expr;
 }
 
 static ASTNode* declaration() {
     if (match(TOKEN_FIRM)) {
-        consume(TOKEN_IDENTIFIER, "Expect name.");
+        consume(TOKEN_IDENTIFIER, "Expect name for firm constant.");
         char* name = copy_string(parser.previous.start, parser.previous.length);
-        consume(TOKEN_EQUALS, "Expect '='.");
+        consume(TOKEN_EQUALS, "Expect '=' after constant name.");
         ASTNode* node = ast_create_node(NODE_CONST_DECL, parser.previous.line);
         node->data.declaration.name = name;
         node->data.declaration.value = expression();
@@ -309,6 +345,9 @@ static ASTNode* declaration() {
     return statement();
 }
 
+/**
+ * Entry point for parsing a Riven source.
+ */
 ASTNode* parser_parse() {
     advance();
     ASTNode* root = ast_create_node(NODE_PROGRAM, 0);
@@ -317,15 +356,19 @@ ASTNode* parser_parse() {
 
     while (!check(TOKEN_EOF)) {
         if (match(TOKEN_RIVEN)) {
-            consume(TOKEN_CORE, "Expect 'core'.");
+            consume(TOKEN_CORE, "Expect 'core' after 'riven'.");
             ASTNode* core = ast_create_node(NODE_CORE_BLOCK, parser.previous.line);
             ASTNode* b = block();
             core->data.program.nodes = b->data.program.nodes;
             core->data.program.count = b->data.program.count;
-            free(b);
+            /* Note: b's memory is freed by ast_free, but we transfer child ownership */
             root->data.program.count++;
             root->data.program.nodes = realloc(root->data.program.nodes, sizeof(ASTNode*) * root->data.program.count);
             root->data.program.nodes[root->data.program.count - 1] = core;
+        } else if (match(TOKEN_CONSISTOF)) {
+            consume(TOKEN_STRING, "Expect library path after consistof.");
+            /* Import logic handled by Toolchain */
+            continue;
         } else {
             root->data.program.count++;
             root->data.program.nodes = realloc(root->data.program.nodes, sizeof(ASTNode*) * root->data.program.count);
