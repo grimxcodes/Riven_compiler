@@ -13,7 +13,7 @@ static int  g_failed = 0;
 #define CHECK_EQ(a,b) do {                                          \
     if ((a) != (b)) {                                               \
         std::cerr << "  FAIL  " << __FILE__ << ":" << __LINE__     \
-                  << "  expected=" << (b) << "  got=" << (a) << "\n"; \
+                  << "  expected=" << (int)(b) << "  got=" << (int)(a) << "\n"; \
         ++g_failed;                                                 \
     } else { ++g_passed; }                                          \
 } while(0)
