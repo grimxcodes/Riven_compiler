@@ -4,6 +4,11 @@
 #include <iostream>
 #include <string>
 
+inline std::ostream& operator<<(std::ostream& os, TokenKind kind) {
+    return os << static_cast<int>(kind);
+}
+
+
 // ─────────────────────────────────────────────
 //  Helpers
 // ─────────────────────────────────────────────
@@ -13,7 +18,7 @@ static int  g_failed = 0;
 #define CHECK_EQ(a,b) do {                                          \
     if ((a) != (b)) {                                               \
         std::cerr << "  FAIL  " << __FILE__ << ":" << __LINE__     \
-                  << "  expected=" << (int)(b) << "  got=" << (int)(a) << "\n"; \
+                  << "  expected=" << (b) << "  got=" << (a) << "\n"; \
         ++g_failed;                                                 \
     } else { ++g_passed; }                                          \
 } while(0)
